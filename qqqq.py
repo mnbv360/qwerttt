@@ -1,194 +1,267 @@
-import logging
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardRemove,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
-    ContextTypes,
-    filters,
-)
-from telegram.request import HTTPXRequest
-
-# ====== НАСТРОЙКИ ======
-TOKEN = "8937941894:AAFepAiQiydPxkUKGU8G_PRb1p9wZ0Ef0ao"
-ADMIN_CHAT_ID = 8837425135
-
-logging.basicConfig(level=logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
-# Состояния диалога
-CHOOSING, MODEL_FORM, MODEL_PHOTO_FACE, MODEL_PHOTO_FULL, OPERATOR_FORM = range(5)
-
-
-# ================= СТАРТ / МЕНЮ =================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Анкета для моделей", callback_data="choose_model")],
-        [InlineKeyboardButton("🖥 Анкета для операторов", callback_data="choose_operator")],
-    ])
-    await update.message.reply_text(
-        "Привет! Выбери, какую анкету хочешь заполнить:",
-        reply_markup=keyboard,
-    )
-    return CHOOSING
-
-
-# ================= ВЫБОР: АНКЕТА ДЛЯ МОДЕЛЕЙ =================
-async def choose_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    form_text = (
-        "Анкета для моделей\n"
-        "• Имя\n"
-        "• город\n"
-        "• Номер телефона\n"
-        "• Дата рождения\n"
-        "• Знания английского от 0 до 10\n"
-        "• Проживание: одна/не одна\n"
-        "• Есть 2 мобильных телефона или комп + телефон?\n"
-        "• Модель устройства\n"
-        "• Сколько часов и дней в неделю готова уделять работе?\n"
-        "• Есть наушники?\n"
-        "• Телеграм для связи\n\n"
-        "Заполни анкету и отправь ОДНИМ сообщением 👇"
-    )
-    await query.edit_message_text(form_text)
-    return MODEL_FORM
-
-
-async def get_model_form(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["form_text"] = update.message.text
-    await update.message.reply_text("Отлично! Теперь отправь фото в анфас 📸")
-    return MODEL_PHOTO_FACE
-
-
-async def get_model_photo_face(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.photo:
-        await update.message.reply_text("Пожалуйста, отправь именно фото.")
-        return MODEL_PHOTO_FACE
-    context.user_data["photo_face"] = update.message.photo[-1].file_id
-    await update.message.reply_text("Отлично! Теперь фото в полный рост 📸")
-    return MODEL_PHOTO_FULL
-
-
-async def get_model_photo_full(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.photo:
-        await update.message.reply_text("Пожалуйста, отправь именно фото.")
-        return MODEL_PHOTO_FULL
-    context.user_data["photo_full"] = update.message.photo[-1].file_id
-
-    user = update.effective_user
-    summary = (
-        f"🆕 Новая анкета (МОДЕЛЬ)\n"
-        f"От: @{user.username if user.username else user.first_name}\n\n"
-        f"{context.user_data['form_text']}"
-    )
-
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=summary)
-    await context.bot.send_photo(
-        chat_id=ADMIN_CHAT_ID,
-        photo=context.user_data["photo_face"],
-        caption="Фото: анфас",
-    )
-    await context.bot.send_photo(
-        chat_id=ADMIN_CHAT_ID,
-        photo=context.user_data["photo_full"],
-        caption="Фото: полный рост",
-    )
-
-    await update.message.reply_text(
-        "Спасибо! Твоя анкета отправлена ✅\nС тобой свяжутся в ближайшее время."
-    )
-    return ConversationHandler.END
-
-
-# ================= ВЫБОР: АНКЕТА ДЛЯ ОПЕРАТОРОВ =================
-async def choose_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    form_text = (
-        "Анкета для операторов\n"
-        "—Анкета—\n"
-        "1. Имя и фамилия:\n"
-        "2. Дата рождения:\n"
-        "3. Видеокарта:\n"
-        "4. Процессор:\n"
-        "5. Оперативка и ее частота:\n"
-        "6. Скорость интернет-соединения (мбит/сек | mbps):\n"
-        "7. Уровень знания английского:\n"
-        "8. Номер телефона:\n"
-        "9. Username в тг:\n"
-        "10. Опыт в адулте:\n\n"
-        "Заполни анкету и отправь ОДНИМ сообщением 👇"
-    )
-    await query.edit_message_text(form_text)
-    return OPERATOR_FORM
-
-
-async def get_operator_form(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    summary = (
-        f"🆕 Новая анкета (ОПЕРАТОР)\n"
-        f"От: @{user.username if user.username else user.first_name}\n\n"
-        f"{update.message.text}"
-    )
-
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=summary)
-
-    await update.message.reply_text(
-        "Спасибо! Твоя анкета отправлена ✅\nС тобой свяжутся в ближайшее время."
-    )
-    return ConversationHandler.END
-
-
-# ================= ОТМЕНА =================
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Анкета отменена. Чтобы начать заново, напиши /start",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    return ConversationHandler.END
-
-
-def main():
-    request = HTTPXRequest(
-        connect_timeout=30,
-        read_timeout=30,
-        write_timeout=30,
-        pool_timeout=30,
-    )
-
-    app = Application.builder().token(TOKEN).request(request).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CHOOSING: [
-                CallbackQueryHandler(choose_model, pattern="^choose_model$"),
-                CallbackQueryHandler(choose_operator, pattern="^choose_operator$"),
-            ],
-            MODEL_FORM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_model_form)],
-            MODEL_PHOTO_FACE: [MessageHandler(filters.PHOTO, get_model_photo_face)],
-            MODEL_PHOTO_FULL: [MessageHandler(filters.PHOTO, get_model_photo_full)],
-            OPERATOR_FORM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_operator_form)],
+{
+  "info": {
+    "text": "<b><tg-emoji emoji-id=\"5463283320605395706\">🦇</tg-emoji></b><b> 𝗣𝗵𝗼𝗲𝗻𝗶𝘅 𝗧𝗲𝗮𝗺 — агентство, которое помогает моделям, операторам и скаутам зарабатывать удалённо.\n</b>\n<b>В чем заключается работа?</b>\nВсё просто: ты ищешь людей по различным актуальным офферам (Fashion<tg-emoji emoji-id=\"5211089700047047673\">🩷</tg-emoji>, webcam<tg-emoji emoji-id=\"5282943390512597358\">🙋‍♂</tg-emoji>, onlyfans<tg-emoji emoji-id=\"6014919101808383698\">💳</tg-emoji>- проекты) и передаешь контакты заинтересованных кандидатов нам. \n•  <b>Твоя задача</b>: Найти кандидата любым способом и передать нам\n•   <b>Наша задача:</b> Провести собеседование, обучить и вывести кандидата на работу.\n\n<b>Почему стоит работать с нами?</b>\n<tg-emoji emoji-id=\"5307642557725944341\">▫️</tg-emoji> <b>Самый большие выплаты</b> за офферы среди конкурентов \n<tg-emoji emoji-id=\"5307642557725944341\">▫️</tg-emoji> <b>Множество различных офферов</b>, ты можешь выбрать подходящий вариант для себя \n<tg-emoji emoji-id=\"5307642557725944341\">▫️</tg-emoji> <b>Мощная поддержка:</b> Мы обучаем с нуля (формат 1/1 звонок или помощь группы), выдаем готовые скрипты и аккаунты для работы.\n<tg-emoji emoji-id=\"5307642557725944341\">▫️</tg-emoji><b> Прозрачные деньги</b>: Частые выплаты в USDT \n<tg-emoji emoji-id=\"5307642557725944341\">▫️</tg-emoji> <b>Свобода</b>: Работай в любое время, совмещая с основной деятельностью, граффик зависит от тебя\n\n<b>Сколько ты будешь зарабатывать?</b>\n<tg-emoji emoji-id=\"5255948232567051942\">💸</tg-emoji> <b>Быстрые деньги:</b> $15 за каждого приведенного оператора\n<tg-emoji emoji-id=\"5255948232567051942\">💸</tg-emoji> <b>Пассивный доход</b>: $7 ежедневно за каждую работающую модель, которую ты привел.",
+    "button": "ℹ️ Инфа"
+  },
+  "terms": "<b><tg-emoji emoji-id=\"5188272613272591128\">📝</tg-emoji></b><b> Условия</b>\n\n<blockquote><tg-emoji emoji-id=\"5188579565995301367\">😳</tg-emoji> Ты будешь агентом (скаутом): твоя задача — обрабатывать кандидатов, общаться с ними и доводить до записи на оффер.\n\n<tg-emoji emoji-id=\"5188612345185705198\">🕷</tg-emoji> Ты работаешь с аккаунтов, ведёшь переписку и записываешь кандидатов на различные офферы (агенты, модели OF, стриминг модели, операторы и т.п.)\n\n<tg-emoji emoji-id=\"5228891712423739087\">💸</tg-emoji> С дохода модели получаешь оплату 7$ за каждую смену (это ~150$ в месяц с одной модели). Если у тебя будет 10 моделей, это уже ~1500$ в месяц, и так далее;  за успешно пройдённое собеседование твоего оператора ты получаешь $15, $7.5 за оператора твоего скаута\n\n<tg-emoji emoji-id=\"5460858729962421671\">✨</tg-emoji> Выплаты каждый вторник на USDT BEP-20\n\n<tg-emoji emoji-id=\"5280896288840231143\">🇱🇾</tg-emoji> График свободный — работаешь когда угодно и откуда угодно (наличие ПК необязательно)\n\n<tg-emoji emoji-id=\"5188272613272591128\">📝</tg-emoji> Твоим обучением будет заниматься опытный наставник и буквально за ручку доведёт до результата\n\n<tg-emoji emoji-id=\"5461055585493470291\">🔥</tg-emoji> Все расходники (VPN, прокси, аккаунты, трафик, базы и т.д.) предоставляются бесплатно</blockquote>",
+  "offers": {
+    "model": {
+      "text": "<tg-emoji emoji-id=\"5461003496130101704\">💎</tg-emoji> <b>Оффер — Модель (OF / стриминг)\n</b>\n<b>Модель</b> — это стримерша, которая ведёт разговорные прямые эфиры и развивает личный бренд на стриминговых площадках (Bigo Live, Hola и др.).\n\n<tg-emoji emoji-id=\"5188272613272591128\">📝</tg-emoji><b>Формат:</b> общение, блоги, гейминг, творчество (музыка, танцы, рисование) — строго без обнажения.\n\n<tg-emoji emoji-id=\"5461055585493470291\">🔥</tg-emoji><b>Условия для модели:</b>\n· Свободный график от 3 ч/день\n· Заработок от 80 000 ₽/мес (монетизация + донаты)\n· Оплачиваемая стажировка 3 дня\n· Продюсер и креативная команда на каждом этапе\n<tg-emoji emoji-id=\"5460858729962421671\">✨</tg-emoji><b>Требования:</b> девушка 18–27 лет, паспорт, телефон/ноутбук, стабильный интернет. Английский — не обязателен.\n<tg-emoji emoji-id=\"5228891712423739087\">💸</tg-emoji><b> Сколько ты заработаешь за её привлечение:</b>\n· <b>7$ за каждый день</b> её работы — тебе на счёт\n· В среднем <b>~250$/мес</b> с одной активной модели\n· <b>5 моделей = ~1 200$/мес</b> пассивного дохода\n· Выплаты на криптокошелёк раз в 1–2 недели\n\nЧем больше моделей ты привёл и чем дольше они работают — тем стабильнее и выше твой доход.",
+      "button": "💎 Оффер модель"
+    },
+    "scout": {
+      "text": "<tg-emoji emoji-id=\"5312545945794143278\">👩‍💻</tg-emoji><b> Оффер —</b> <b>Скаут \n</b>\n<b> Скаут (рекрутер)</b> — агент, ищущий операторов и моделей для агентства. Приводите людей, которые приводят людей, получайте пассивный доход.\n\n<tg-emoji emoji-id=\"5188272613272591128\">📝</tg-emoji><b>Как это работает теперь:</b>\n· Ты получаешь свою персональную реферальную ссылку на этого бота\n· Делишься ей с людьми — все, кто перейдёт по ней и запустит бота, закрепляются за тобой как твои скауты\n· Твои скауты сами заполняют анкеты на моделей и операторов — и ты получаешь процент с их заработка\n·  Опыт не обязателен\n<tg-emoji emoji-id=\"5228891712423739087\">💸</tg-emoji><b> Заработок с твоих скаутов:</b>\n·  <b>$7.5</b> за каждого оператора твоего скаута, успешно прошедшего собеседование\n·  \n<b>Пример:</b> 10 твоих скаутов приводят по 1 оператору = $75 тебе в карман \n\n<b>Старт:</b>\n1. Нажми «Получить реферальную ссылку»\n2. Делись ей с людьми\n3. Следи за статистикой в разделе «Мои скауты»",
+      "title": "🕵️ Оффер скаут",
+      "button": "🕵️ Оффер скаут"
+    },
+    "operator": {
+      "text": "🎥 <tg-emoji emoji-id=\"5312545945794143278\">👩‍💻</tg-emoji> <b>Оффер — Оператор</b>\n<b>Оператор</b> — это сотрудник, который работает удалённо за ПК и ведёт текстовое общение на стриминговых площадках от лица моделей. Опыт не нужен — всему обучают.\n\n<tg-emoji emoji-id=\"5188272613272591128\">📝</tg-emoji><b>Требования:</b>\n· Парень/девушка, 18+\n· Русскоязычный, без сильного акцента\n· Если учится — обязательно уточнить\n· Стабильный интернет от 100 Мбит/с\n· Наушники\n<tg-emoji emoji-id=\"5442783050859555767\">⚙️</tg-emoji><b>Техника (основной партнёр):</b>\n· Процессор: Intel i5/i7 10+ или Ryzen аналог\n· Видеокарта: GTX 1060 / RX аналог (2019+)\n· ОЗУ: 16 ГБ (от 2666 МГц) или 8 ГБ (от 3200 МГц)\n· Mac не подходит\n<tg-emoji emoji-id=\"5442887087852365046\">🌐</tg-emoji><b>Техника (партнёр с мягкими требованиями):</b>\n· Процессор: от 4 ядер / 4 потоков\n· Видеокарта: встроенная подойдёт\n· ОЗУ: от 8 ГБ\n· MacBook M1+ (M3 — идеально)\n\n<tg-emoji emoji-id=\"5228891712423739087\">💸</tg-emoji><b> Сколько ты заработаешь за его привлечение:</b>\n· <b>1–3 оператора</b> — по <b>15$</b> за каждого\n· <b>3–6 операторов</b> — по <b>20$</b>\n· <b>6+ операторов</b> — по <b>22.5$</b>\n· Оплата за <b>прохождение собеседования</b>, а не за выход на смену",
+      "title": "🎥 Оффер оператор",
+      "button": "🎥 Оффер оператор"
+    }
+  },
+  "support": {
+    "sent": "✅ Сообщение отправлено! Мы скоро ответим.",
+    "text": "<tg-emoji emoji-id=\"5442716079434508066\">◽️</tg-emoji> <b>Техподдержка</b>\n\nЕсли у тебя возник вопрос или проблема — напиши сообщение, и мы ответим тебе в ближайшее время.\n\nИли свяжись напрямую: @time_1_leader",
+    "button": "🛠 Техподдержка",
+    "ask_message": "✍️ Напиши своё сообщение, оно будет отправлено администратору.",
+    "write_button": "✍️ Написать в поддержку"
+  },
+  "welcome": "<tg-emoji emoji-id=\"5463306406054610485\">🤝</tg-emoji> <b>Приветствую!</b>\n\nЭтот бот агентства <b>𝗣𝗵𝗼𝗲𝗻𝗶𝘅 𝗧𝗲𝗮𝗺</b> <tg-emoji emoji-id=\"5461055585493470291\">🔥</tg-emoji>\n\nНажми кнопку ниже, чтобы перейти дальше",
+  "main_menu": "✦ <b>𝗣𝗵𝗼𝗲𝗻𝗶𝘅 𝗧𝗲𝗮𝗺</b> · бот рекрутёра\n\nВыберите действие:",
+  "ask_referrer": "🤝 <b>Кто тебя пригласил?</b>\n\nОтправь его Telegram username в формате <code>@username</code>.\n\nЕсли никто не приглашал — нажми кнопку ниже или напиши «нет».",
+  "registration_done": "✅ Регистрация завершена!\n\nДобро пожаловать в <b>𝗣𝗵𝗼𝗲𝗻𝗶𝘅 𝗧𝗲𝗮𝗺</b> 🐰",
+  "referral": {
+    "button": "🔗 Моя реферальная ссылка",
+    "get_link_button": "🔗 Получить реферальную ссылку",
+    "intro": "🔗 <b>Твоя персональная реферальная ссылка</b>\n\n<code>{link}</code>\n\nОтправь её людям — все, кто запустит бота по этой ссылке, автоматически закрепятся за тобой как твои скауты. Ты будешь получать процент с их заработка (анкеты на моделей и операторов).\n\nСледи за статистикой в разделе «👥 Мои скауты».",
+    "share_button": "📤 Поделиться ссылкой",
+    "share_text": "Присоединяйся к 𝗣𝗵𝗼𝗲𝗻𝗶𝘅 𝗧𝗲𝗮𝗺 🤝 — зарабатывай удалённо на поиске моделей и операторов!",
+    "new_scout_notify": "🎉 По твоей реферальной ссылке в бота пришёл новый человек!\n\n👤 {name} ({username})\n\nТеперь он твой скаут — как только он заполнит анкеты, ты будешь получать процент с его заработка."
+  },
+  "my_scouts": {
+    "button": "👥 Мои скауты",
+    "title": "👥 <b>Мои скауты</b>\n\nВсего скаутов: <b>{count}</b>",
+    "empty": "\n\nУ тебя пока нет приглашённых скаутов.\nНажми «🔗 Получить реферальную ссылку», чтобы начать собирать команду!",
+    "body": "\n\n📋 Их анкет на операторов: <b>{op_count}</b>\n📋 Их анкет на моделей: <b>{model_count}</b>\n\n💰 <b>Их заработок:</b>\n· С операторов (15$ за каждого, кто прошёл собеседование): <b>{op_earn}$</b>\n· С моделей (7$ за смену × {model_shifts} смен): <b>{model_earn}$</b>\n· Всего: <b>{total_earn}$</b>\n\n✨ <b>Мои из них:</b> <b>{my_share}$</b>\n· с операторов (5$ за каждого): {my_share_op}$\n· с моделей : {my_share_model}$",
+    "list_header": "👥 <b>Список твоих скаутов</b>",
+    "list_item": "\n\n{num}. <b>{name}</b> ({username})\n🆔 <code>{id}</code>\n🎥 Операторы: {op_count} (✅ прошли: {op_passed})\n💎 Модели: {model_count} (🔁 смен: {model_shifts}){status_note}",
+    "list_unregistered_note": "\n⏳ регистрацию ещё не завершил(а)"
+  },
+  "my_stats": {
+    "button": "📊 Моя статистика",
+    "title": "📊 <b>Моя статистика</b>\n\n👥 Скауты: <b>{scouts}</b>\n💎 Модели: <b>{models}</b>\n🎥 Операторы: <b>{operators}</b>\n\n💰 <b>Заработано:</b>\n· С скаутов: <b>{from_scouts}$</b>\n· С моделей ({model_shifts} смен × 7$): <b>{from_models}$</b>\n· С операторов ({operators_passed} × 15$): <b>{from_operators}$</b>\n· Всего: <b>{total}$</b>"
+  },
+  "statuses": {
+    "operator": {
+      "reject_assign": "🚫 Отказ от назначения",
+      "no_show": "🚷 Не пришёл",
+      "partner_reject": "❌ Отказ со стороны партнёра",
+      "candidate_reject": "❌ Отказ со стороны кандидата",
+      "already_brought": "♻️ Оператора уже приводили",
+      "reschedule": "🔁 Перенос",
+      "passed": "✅ Прошёл"
+    },
+    "model": {
+      "leak": "💧 Слив",
+      "assigned": "📌 Назначено",
+      "no_show": "🚷 Не пришла",
+      "candidate_reject": "❌ Отказ со стороны кандидата",
+      "partner_reject": "❌ Отказ со стороны партнёра",
+      "reject_assign": "🚫 Отказ от назначения"
+    }
+  },
+  "status_set_notify": "ℹ️ Статус твоей анкеты ({offer}) обновлён:\n\n{status}",
+  "shift_added_notify": "✅ Админ отметил ещё одну отработанную смену по твоей анкете (модель).\n\nВсего смен: {shifts} · Заработано с этой модели: {earn}$",
+  "admin_requests": {
+    "header": "📂 <b>Актуальные заявки: {offer}</b>\nВсего найдено: {count}\n\nНиже отдельными карточками — все анкеты. В каждой можно сменить статус или удалить анкету кнопкой.",
+    "empty": "📂 Актуальных заявок по направлению «{offer}» пока нет.",
+    "truncated": "ℹ️ Показаны первые {shown} анкет из {total}. Остальные удали/обработай часть текущих, чтобы увидеть следующие.",
+    "deleted_suffix": "\n\n🗑 <b>Анкета удалена администратором</b>"
+  },
+  "anketa": {
+    "fill_button": "📋 Заполнить анкету",
+    "back_button": "⬅️ Назад к прошлому вопросу",
+    "menu_button": "🏠 Назад в меню",
+    "restart_hint": "Напиши /anketa, чтобы попробовать заново.",
+    "choose_text": "📋 Какую анкету хочешь заполнить?",
+    "model": {
+      "title": "<b>Анкета на модель</b>",
+      "lead_prompt": "Откуда лид?",
+      "lead_options": [
+        { "key": "dating", "label": "💘Дейтинги" },
+        { "key": "instagram", "label": "📷Инстаграм" },
+        { "key": "streaming", "label": "🎥Стрим. площадки" },
+        { "key": "threads", "label": "🧵 Тредс" }
+      ],
+      "questions": [
+        {
+          "key": "full_name",
+          "prompt": "1️⃣ ФИО кандидатки:",
+          "type": "text",
+          "error": "⚠️ Укажи, пожалуйста, настоящие имя и фамилию (минимум два слова, только буквы)."
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    app.add_handler(conv_handler)
-    print("Бот запущен и работает...")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+        {
+          "key": "birth_date",
+          "prompt": "2️⃣ Дата рождения в формате ДД.ММ.ГГГГ:",
+          "type": "text",
+          "error": "⚠️ Укажи дату рождения в формате ДД.ММ.ГГГГ, например 15.04.1999."
+        },
+        {
+          "key": "phone",
+          "prompt": "3️⃣ Номер телефона (с кодом страны):",
+          "type": "text",
+          "error": "⚠️ Укажи номер телефона с кодом страны, например +79991234567."
+        },
+        {
+          "key": "city",
+          "prompt": "4️⃣ Город:",
+          "type": "text",
+          "error": "⚠️ Укажи город только буквами, например Москва."
+        },
+        {
+          "key": "english_level",
+          "prompt": "5️⃣ Знания английского от 0 до 10:",
+          "type": "text",
+          "error": "⚠️ Укажи целое число от 0 до 10."
+        },
+        {
+          "key": "living",
+          "prompt": "6️⃣ Проживание:",
+          "type": "buttons",
+          "options": [
+            { "key": "alone", "label": "🏠 Одна" },
+            { "key": "not_alone", "label": "👨‍👩‍👧 Не одна" }
+          ]
+        },
+        {
+          "key": "work_time",
+          "prompt": "7️⃣ Сколько часов и дней в неделю готова уделять работе?",
+          "type": "text",
+          "error": "⚠️ Укажи конкретно часы в день и дни в неделю, например «4 часа, 5 дней в неделю»."
+        },
+        {
+          "key": "telegram",
+          "prompt": "8️⃣ Телеграм кандидатки (без @):",
+          "type": "text",
+          "error": "⚠️ Укажи корректный username Telegram (5-32 символа: буквы, цифры, подчёркивание), без @."
+        },
+        {
+          "key": "device_type",
+          "prompt": "9️⃣ С какого устройства будет работать?",
+          "type": "buttons",
+          "options": [
+            { "key": "pc", "label": "💻 ПК/ноутбук с камерой" },
+            { "key": "phone_new", "label": "📱 Телефон 2023 года или новее" },
+            { "key": "phone_old", "label": "📱 Телефон старше 2023 года" },
+            { "key": "unspecified", "label": "❓ Не уточнял(а)" }
+          ]
+        },
+        {
+          "key": "device_model",
+          "prompt": "Укажите точную модель устройства:",
+          "type": "text",
+          "error": "⚠️ Укажи точную модель устройства, например iPhone 14 Pro или MacBook Air M2."
+        },
+        {
+          "key": "photos",
+          "prompt": "🔟 Пришли, пожалуйста, 2 фото — в анфас и в полный рост:",
+          "type": "photo",
+          "count": 2
+        },
+        {
+          "key": "headphones",
+          "prompt": "1️⃣1️⃣ Есть наушники?",
+          "type": "buttons",
+          "options": [
+            { "key": "yes", "label": "✅ Да" },
+            { "key": "no", "label": "❌ Нет" }
+          ]
+        }
+      ],
+      "device_fail": "⛔ Подача не пройдёт с этим ответом. Телефон старше 2023 года не тянет трансляцию — это вторая причина отказов (18,2%). Подходит ПК или ноутбук с камерой либо телефон 2023 года и новее; чем новее флагман, тем стабильнее картинка. Спросите модель устройства: «хороший телефон» — не ответ.\n\nНапиши /anketa, чтобы попробовать заново.",
+      "success": "Успешно ✅, ожидайте когда с вами свяжутся для записи кандидата на собеседование"
+    },
+    "operator": {
+      "title": "<b>Анкета на оператора</b>",
+      "lead_prompt": "Откуда лид?",
+      "lead_options": [
+        { "key": "adult_boards", "label": "💘 Адалт боарды" },
+        { "key": "tiktok", "label": "📷 Тикток" },
+        { "key": "other", "label": "📌 Прочее" }
+      ],
+      "questions": [
+        {
+          "key": "full_name",
+          "prompt": "И.Ф —",
+          "type": "text",
+          "error": "⚠️ Укажи имя и фамилию (минимум два слова, только буквы)."
+        },
+        {
+          "key": "country",
+          "prompt": "Страна —",
+          "type": "text",
+          "error": "⚠️ Укажи страну только буквами."
+        },
+        {
+          "key": "birth_date",
+          "prompt": "Дата рождения (ДД.ММ.ГГГГ) —",
+          "type": "text",
+          "error": "⚠️ Укажи дату рождения в формате ДД.ММ.ГГГГ."
+        },
+        {
+          "key": "contacts",
+          "prompt": "Контактные данные (юз + номер) —",
+          "type": "text",
+          "error": "⚠️ Укажи и Telegram username (с @), и номер телефона в одном сообщении."
+        },
+        {
+          "key": "english_level",
+          "prompt": "Владение англ. яз. —",
+          "type": "buttons",
+          "options": [
+            { "key": "none", "label": "Нет" },
+            { "key": "basic", "label": "Базовый" },
+            { "key": "intermediate", "label": "Средний" },
+            { "key": "advanced", "label": "Продвинутый" },
+            { "key": "fluent", "label": "Свободный" }
+          ]
+        },
+        {
+          "key": "internet_speed",
+          "prompt": "Скорость интернета —",
+          "type": "text",
+          "error": "⚠️ Укажи скорость интернета в Мбит/с, например «120 Мбит/с»."
+        },
+        {
+          "key": "pc_specs",
+          "prompt": "Харк ПК (процессор, видеокарта, ОЗУ) —",
+          "type": "text",
+          "error": "⚠️ Укажи подробно процессор, видеокарту и объём ОЗУ."
+        },
+        {
+          "key": "experience",
+          "prompt": "Опыт работы —",
+          "type": "text",
+          "error": "⚠️ Расскажи про опыт работы (или напиши «нет опыта»)."
+        },
+        {
+          "key": "headphones",
+          "prompt": "Наушники —",
+          "type": "buttons",
+          "options": [
+            { "key": "yes", "label": "✅ Да" },
+            { "key": "no", "label": "❌ Нет" }
+          ]
+        },
+        {
+          "key": "interview_time",
+          "prompt": "Когда будет удобно пройти собеседование? (с 11 до 18 по мск, воскресенье выходной)",
+          "type": "text",
+          "error": "⚠️ Укажи удобный день (кроме воскресенья) и время с 11 до 18 по МСК, например «вторник, 14:00»."
+        }
+      ],
+      "success": "Успешно ✅, ожидайте когда с вами свяжутся для записи кандидата на собеседование"
+    }
+  }
+}
