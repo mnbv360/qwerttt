@@ -17,8 +17,8 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 # ====== НАСТРОЙКИ ======
-TOKEN = "8937941894:AAFepAiQiydPxkUKGU8G_PRb1p9wZ0Ef0ao"
-ADMIN_CHAT_ID = 8837425135
+TOKEN = 
+ADMIN_CHAT_ID = 
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
